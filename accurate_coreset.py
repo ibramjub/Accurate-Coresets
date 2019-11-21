@@ -1,18 +1,14 @@
 """*****************************************************************************************
 MIT License
-
 Copyright (c) 2019 Ibrahim Jubran, Alaa Maalouf, Dan Feldman
-
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
-
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
-
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,19 +20,20 @@ SOFTWARE.
 
 
 ################################### NOTES ###########################################
-# - Please cite our paper when using the code: 
+# - Please cite our paper when using the code:
 #                "Accurate Coresets"
 #    Ibrahim Jubran and Alaa Maalouf and Dan Feldman
 #
-# - Code for other coresets, both accurate and eps-coresets, will be published soon. 
+# - Code for other coresets, both accurate and eps-coresets, will be published soon.
 #####################################################################################
 
-
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg
 import time
 from helper_functions import Fast_Caratheodory, train_model, get_new_clf, test_model
 from sklearn import linear_model
+from sklearn.decomposition import PCA
 
 
 class WeightedSet:
@@ -76,28 +73,18 @@ class WeightedSet:
 # Accurate 1 center coreset
 # input: unweighted data P (nXd) on a line in R^d (ignores the weights in Pset if they exist)
 # Output: row indices of the coreset points C \subseteq P
+
 def one_center(Pset):
     if check_weights_if_ones(Pset) == 0:
         return Pset
 
-    P = Pset.P
-    # Subtract mean and then compute the best line that fits the points
-    P = P - np.mean(P, axis=0)
-    U, D, Vt = scipy.linalg.svd(P, full_matrices=True)
 
-    SSD = np.sum(D[1:])
-    if (SSD > small_number):
-        print("Data is not on a line!")
-        return P
+    idx = findFarthestPointFromCenter(Pset, Pset.P[0])
+    p = Pset.P[idx]
+    idx = findFarthestPointFromCenter(Pset, p)
+    p2 = Pset.P[idx]
 
-    v = Vt[0, :]  # The direction vector of the line that the points lie on
-
-    # Project points on v and return the 2 points that yield the smallest and largest projection values
-    P_proj = np.matmul(P, v)
-    P_min_idx = np.argmin(P_proj)
-    P_max_idx = np.argmax(P_proj)
-
-    C = Pset.P[(P_min_idx, P_max_idx), :]
+    C = np.array([p,p2])
     Cset = WeightedSet(C, np.ones(C.shape[0]))
 
     return Cset
@@ -163,7 +150,7 @@ def one_mean_3(Pset):
     # Add 2 more dimensions to each point: p -> (p, ||p||, 1)
     Q = Pset.P
     Q_norms = np.linalg.norm(Q, axis=1)
-    Q = np.concatenate((Q, Q_norms.reshape(Q_norms.shape[0], 1), np.ones((Q.shape[0], 1))), axis=1)
+    Q = np.concatenate((Q, np.power(Q_norms.reshape(Q_norms.shape[0], 1),2), np.ones((Q.shape[0], 1))), axis=1)
 
     # Create another weighted set with Q and the same weights of Pset
     Qset = WeightedSet(Q, Pset.W)
@@ -266,13 +253,10 @@ def align_vectors(u, v):
 # Given a unit vector x, compute the orthogonal complement of x
 def orthogonal_complement(x, threshold=1e-15):
     """Compute orthogonal complement of a matrix
-
     this works along axis zero, i.e. rank == column rank,
     or number of rows > column rank
     otherwise orthogonal complement is empty
-
     TODO possibly: use normalize='top' or 'bottom'
-
     """
 
     if (abs(np.linalg.norm(x) - 1) > small_number):
@@ -371,7 +355,6 @@ def matrix_norm_checker(Pset, Cset):
     if (np.abs(real_data - coreset_data) > small_number):
         print("Not good!", np.abs(real_data - coreset_data))
 
-
 def LMS_solvers(Pset, solver,coreset_size=None):
     Cset = matrix_norm2(Pset, coreset_size)
     if solver in ["linear", "ridge"] :
@@ -396,8 +379,7 @@ def regressions_checker():
     n = 240000
     d = 3
     data_range = 100
-    num_of_alphas = 300
-    folds = 3
+
     data = np.floor(np.random.rand(n, d) * data_range)
     labels = np.floor(np.random.rand(n, 1) * data_range)
     weights = np.ones(n)
@@ -423,9 +405,37 @@ def regressions_checker():
         if np.abs(score_coreset - score_real) > small_number :
             print ("Not good. Error in LMS CORESET")
 
+
+def findclosestcenter(p_w, centers):
+    dists = []
+    for t,center in enumerate(centers):
+        total = dist2point(p_w,center)
+        dists.append(total)
+    return np.min(np.array(dists))
+
+
+def dist2point(p_w,center,cost="sum"):
+    distance = p_w.P - center
+    norm_distance = np.linalg.norm(distance, axis=1)
+    squared_norm = np.power(norm_distance, 2)
+    if cost == "sum":
+        total = np.sum(squared_norm * p_w.W)
+    else:
+        total = np.max(squared_norm * p_w.W)
+    return total
+def findFarthestPointFromCenter(p_w,centers):
+    dists = []
+    for t, center in enumerate(centers):
+        total = dist2point(p_w, center,cost="max")
+        dists.append(total)
+    return np.argmin(np.array(dists))
+
 def main():
     global small_number
     small_number = 0.000001
+
+
+
     regressions_checker()
     P = np.array([[1.7, 0, 2], [3, 1.5, 0], [-7, 5, 0], [6, 2, 1], [1, 1, 2.2], [2, 5, 1], [6, 5, 2]])
     W = np.array([1, 2, 3, 1, 2, 1.5, 0.5])
@@ -468,4 +478,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
